@@ -1,1 +1,1 @@
-# nikon_timelapse_diy
+# Nikon D3100 timelapse diy.
