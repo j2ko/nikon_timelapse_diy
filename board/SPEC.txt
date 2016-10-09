@@ -1,0 +1,25 @@
+The should be 2 general modes for now.
+1. Perform shoot each [capture interval] second during setted [overall capture time]
+2. Perform shoot each [capture interval] until it performs exactly [count captures] numbere of captrues.
+
+Protocol:
+Command contains comand code and command parrameters. Format looks like so :
+[command byte][parrameters]
+
+Currently planned commands:
+
+- Start command.
+  Format : [01][mode]
+  - mode: [mode id][params]
+  Supported modes: 
+	  TIME_BASED - 01
+		params:
+		  - overall time [4bytes] in seconds
+		  - capture interval [byte] in seconds
+	  COUNT_BASED - 02
+	  	params:
+		  - count of captures [4bytes]
+      - capture interval [byte] in seconds 
+
+- Stop command. Stop any running
+  Format : [02]
