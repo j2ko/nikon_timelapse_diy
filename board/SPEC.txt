@@ -1,6 +1,6 @@
-The should be 2 general modes for now.
+There should be 2 general modes for now.
 1. Perform shoot each [capture interval] second during setted [overall capture time]
-2. Perform shoot each [capture interval] until it performs exactly [count captures] numbere of captrues.
+2. Perform shoot each [capture interval] until it performs exactly [count captures] number of captures.
 
 Protocol:
 Command contains comand code and command parrameters. Format looks like so :
@@ -18,8 +18,10 @@ Currently planned commands:
 		  - capture interval [byte] in seconds
 	  COUNT_BASED - 02
 	  	params:
-		  - count of captures [4bytes]
-      - capture interval [byte] in seconds 
+		  - count of captures [2 bytes]
+          - capture interval [byte] in seconds 
 
 - Stop command. Stop any running
   Format : [02]
+  
+Command will be send using TLV fromat.
