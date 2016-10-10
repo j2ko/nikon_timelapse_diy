@@ -152,36 +152,34 @@ protected:
   }
 
   virtual void onFinished() {
+    digitalWrite(PIN_CAPTURE, HIGH);
     cb_->OnTaskFinished(this);
   }
   
   Callback* cb_;
 };
 
-class TakeShootTask : public Task {
+class TakeCaptureTask : public Task {
 public:
-  TakeShootTask(Callback* cb) : Task(cb) {   
+  TakeCaptureTask(Callback* cb) : Task(cb) {   
   }
 protected: 
-  void performShoot() {
-    LOG("[v]");
-    //this could be separated by states
-    digitalWrite(PIN_SHOOT, HIGH);
-    delay(50); //need to rid off delays
-    digitalWrite(PIN_SHOOT, LOW);
-    delay(50); 
-    digitalWrite(PIN_SHOOT, HIGH);   
-    LOG("[^]");
+  void performCapture() {
+    LOG("[+]");
+    digitalWrite(PIN_CAPTURE, HIGH);        
+    delay(100); //need to rid off delays
+    digitalWrite(PIN_CAPTURE, LOW);
+    LOG("[-]");
   }
 };
 
-class TimeBasedTask : public TakeShootTask {
+class TimeBasedTask : public TakeCaptureTask {
   long timeout_;
   long deadline_;
   int interval_;
 public:
-  TimeBasedTask(Callback *cb, long time, int interval): TakeShootTask(cb), timeout_(time), interval_(interval) {    
-    setInterval(interval * 1000);
+  TimeBasedTask(Callback *cb, long time, int interval): TakeCaptureTask(cb), timeout_(time), interval_(interval) {    
+    setInterval(interval*1000);
     LOGN(String("TimeBasedTask [time ") + time  + "][ interval " + interval + "]");
   }
 protected:
@@ -196,26 +194,26 @@ protected:
       return;
     }
 
-    performShoot();    
+    performCapture();    
   }
 };
 
-class CountBasedTask : public TakeShootTask {
+class CountBasedTask : public TakeCaptureTask {
   int count_;
   int interval_;  
 public:
-  CountBasedTask(Callback* cb, int count, int interval): TakeShootTask(cb), count_(count), interval_(interval) {    
+  CountBasedTask(Callback* cb, int count, int interval): TakeCaptureTask(cb), count_(count), interval_(interval) {    
     setInterval(interval*1000);
     LOGN(String("CountBasedTask [count ") + count  + "][ interval " + interval + "]");
   }
 
   void iteration() {    
-    if (--count_ <= 0)  {
+    if (--count_ < 0)  {
       onFinished();
       return;
     }
     
-    performShoot();
+    performCapture();
   }
 };
 
@@ -292,7 +290,8 @@ SerialChannel serial_channel(&command_handler);
 
 void setup() { 
   Serial.begin(9600);
-  
+  pinMode(PIN_CAPTURE, OUTPUT);
+  digitalWrite(PIN_CAPTURE, HIGH);
   serial_channel.setInterval(100);
   controller.add(&serial_channel); 
 }
