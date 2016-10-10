@@ -9,7 +9,7 @@
 #define LOGN(X)
 #endif
 
-const int PIN_SHOOT = 9;
+const int PIN_CAPTURE = 9;
 
 ThreadController controller = ThreadController();
 
@@ -179,7 +179,7 @@ class TimeBasedTask : public TakeCaptureTask {
   int interval_;
 public:
   TimeBasedTask(Callback *cb, long time, int interval): TakeCaptureTask(cb), timeout_(time), interval_(interval) {    
-    setInterval(interval*1000);
+    setInterval(interval * 1000);
     LOGN(String("TimeBasedTask [time ") + time  + "][ interval " + interval + "]");
   }
 protected:
