@@ -9,13 +9,18 @@
 #define LOGN(X)
 #endif
 
+//TODO: 
+//- refactor. Introduce command registry
+//- introduce clear way to serialize/deserialize object to/from TLV
+
 const int PIN_CAPTURE = 9;
 
 ThreadController controller = ThreadController();
 
 enum Command {
   START = 0x1,
-  STOP  = 0x2,  
+  GET_STATUS = 0x2,
+  STOP  = 0x3,
 };
 
 enum Mode { 
@@ -24,19 +29,19 @@ enum Mode {
 };
 
 struct TimeBasedMode {
-  long time;
-  byte interval;
+  uint32_t time;
+  uint8_t interval;
 };
 
 struct CountBasedMode {
-  short count;
-  byte interval;
+  uint16_t count;
+  uint8_t interval;
 };
 
 typedef struct {
-    byte tag;
-    byte length;
-    byte value[255];
+  uint8_t tag;
+  uint8_t length;
+  uint8_t value[255];
 } TLV;
 
 /*
@@ -80,8 +85,8 @@ public:
     
   void run() {
     if (Serial.available() > 0) {
-      byte inByte = Serial.read();
-      int next_state;
+      uint8_t inByte = Serial.read();
+      uint8_t next_state;
       switch(state) {
         case READ_TAG:
           message.tag = inByte;            
@@ -118,7 +123,7 @@ private:
   SerialCommandHandler * handler_; 
   ReadState state = READ_TAG;
   TLV message;
-  int actualy_read = 0; 
+  size_t actualy_read = 0; 
 };
 
 class Task : public Thread {
@@ -133,7 +138,7 @@ public:
   Task(Callback *cb): cb_(cb) {
     
   }
-  
+    
 private:
   virtual void run() {
     if (isFirstRun) {
@@ -143,14 +148,14 @@ private:
     iteration();    
     runned();
   }
-  
+   
 protected:
   virtual void iteration() = 0;
   
   virtual void onStarted() {
     cb_->OnTaskStarted(this);
   }
-
+  
   virtual void onFinished() {
     digitalWrite(PIN_CAPTURE, HIGH);
     cb_->OnTaskFinished(this);
@@ -160,28 +165,56 @@ protected:
 };
 
 class TakeCaptureTask : public Task {
+  uint16_t capturesTaken;
 public:
-  TakeCaptureTask(Callback* cb) : Task(cb) {   
+  TakeCaptureTask(Callback* cb) : Task(cb), capturesTaken(0) {   
   }
+  
+  virtual void getInfo(TLV& info) = 0;
 protected: 
+
   void performCapture() {
     LOG("[+]");
     digitalWrite(PIN_CAPTURE, HIGH);        
     delay(100); //need to rid off delays
     digitalWrite(PIN_CAPTURE, LOW);
+    capturesTaken++;
     LOG("[-]");
+  }
+
+  long getCapturesTaken() {
+    return capturesTaken;
   }
 };
 
 class TimeBasedTask : public TakeCaptureTask {
   long timeout_;
   long deadline_;
-  int interval_;
+  uint8_t interval_;
 public:
-  TimeBasedTask(Callback *cb, long time, int interval): TakeCaptureTask(cb), timeout_(time), interval_(interval) {    
-    setInterval(interval * 1000);
+  TimeBasedTask(Callback *cb, long time, uint8_t interval): TakeCaptureTask(cb), timeout_(time), interval_(interval) {    
+    setInterval(((uint32_t)interval)*1000);
     LOGN(String("TimeBasedTask [time ") + time  + "][ interval " + interval + "]");
   }
+
+  virtual void getInfo(TLV& info) {
+    info.tag = TIMEBASED;
+    info.length = 0x7;
+    long remaining = (deadline_ - millis());
+    //TODO: running time also could be appropriate.
+    //remaining time
+    info.value[0] = remaining >> 24;
+    info.value[1] = (remaining >> 16) & 0xFF;
+    info.value[2] = (remaining >> 8) & 0xFF;
+    info.value[3] = remaining & 0xFF;
+    //interval
+    info.value[4] = interval_;
+    //captures taken so far
+    uint16_t capTaken = getCapturesTaken();
+    info.value[5] = capTaken >> 8;
+    info.value[6] = capTaken & 0xFF;
+  }
+  
 protected:
   virtual void onStarted() {
     deadline_ = millis() + timeout_ * 1000;
@@ -199,14 +232,30 @@ protected:
 };
 
 class CountBasedTask : public TakeCaptureTask {
-  int count_;
-  int interval_;  
+  int32_t count_;
+  uint8_t interval_;
 public:
-  CountBasedTask(Callback* cb, int count, int interval): TakeCaptureTask(cb), count_(count), interval_(interval) {    
-    setInterval(interval*1000);
+  CountBasedTask(Callback* cb, uint16_t count, uint8_t interval): TakeCaptureTask(cb), count_(count), interval_(interval) {    
+    setInterval(((uint32_t)interval)*1000);
     LOGN(String("CountBasedTask [count ") + count  + "][ interval " + interval + "]");
   }
 
+  virtual void getInfo(TLV& info) {
+    info.tag = COUNTBASED;
+    info.length = 0x5;
+    uint16_t remaining = count_;
+    //TODO: running time also could be appropriate.
+    //remaining amaunt of captures.
+    info.value[0] = (remaining >> 8) & 0xFF;
+    info.value[1] = remaining & 0xFF;
+    //interval
+    info.value[2] = interval_;
+    //captures taken so far
+    uint16_t capTaken = getCapturesTaken();
+    info.value[3] = (capTaken >> 8) & 0xFF;
+    info.value[4] = capTaken & 0xFF;
+  }
+  
   void iteration() {    
     if (--count_ < 0)  {
       onFinished();
@@ -219,7 +268,7 @@ public:
 
 class CommandHandler : public SerialChannel::SerialCommandHandler, public Task::Callback {
   BlinkMainLed blink_main_led_;
-  Task* running_task_;
+  TakeCaptureTask* running_task_;
 public:
   CommandHandler() {
     blink_main_led_.setInterval(500);
@@ -231,6 +280,9 @@ public:
       case START:
         setTask(parseTask(len, buf));
         break;
+      case GET_STATUS:
+        requestTaskInfo(running_task_);
+        break;
       case STOP:
         setTask(nullptr);
         break;
@@ -238,23 +290,43 @@ public:
   }
   
 private:
+  void requestTaskInfo(TakeCaptureTask* task) {
+    TLV tlv;
+    if (task == nullptr) {
+      tlv.tag = 0x00;
+      tlv.length = 0x00;
+    } else {
+      task->getInfo(tlv);
+    }
+    
+    respondWithTLV(tlv);
+  }
+
+  void respondWithTLV(const TLV& response) {
+    Serial.write(response.tag);
+    Serial.write(response.length);
+    for (int i = 0; i < response.length; ++i) {   
+      Serial.write(response.value[i]);
+    }    
+  }
+  
   Task* parseTask(byte len, byte *buff) {
-    byte mode = buff[0];
+    uint8_t mode = buff[0];
     switch(mode) {
       case TIMEBASED: {
-        long time;
-        time  = (long)buff[1] << 24;
-        time |= (long)buff[2] << 16;
-        time |= (long)buff[3] << 8;
-        time |= (long)buff[4];        
+        uint32_t time;
+        time  = (uint32_t)buff[1] << 24;
+        time |= (uint32_t)buff[2] << 16;
+        time |= (uint32_t)buff[3] << 8;
+        time |= (uint32_t)buff[4];
         byte interval = buff[5];
         return new TimeBasedTask(this, time, interval);
       }
       case COUNTBASED: {
         short count;
-        count  = (short)buff[1] << 8;
-        count |= (short)buff[2];
-        byte interval = buff[3];
+        count  = (uint16_t)buff[1] << 8;
+        count |= (uint16_t)buff[2];
+        uint8_t interval = buff[3];
         return new CountBasedTask(this, count, interval);
       }
     }
@@ -273,7 +345,7 @@ private:
     setTask(nullptr);
   }
 
-  void setTask(Task *task) {
+  void setTask(TakeCaptureTask *task) {
     if (running_task_ != nullptr) {
         controller.remove(running_task_);
         controller.remove(&blink_main_led_);     
